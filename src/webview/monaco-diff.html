@@ -223,6 +223,7 @@
   </div>
 
   <script src="__MONACO_LOADER_JS__"></script>
+  <script src="__TEXTMATE_JS__"></script>
   <script>
     // ==================================================================
     // VSCode API
@@ -259,6 +260,17 @@
       currentHunkIndex: -1,  // 0-based index into changes array, -1 = none
       dirty: false,          // true when modified model differs from disk
       _syncing: false        // true while we programmatically setValue (ignore change events)
+    };
+
+    // TextMate grammar support
+    var __ONIG_WASM_URI__ = '__ONIG_WASM_URI__'; // replaced by extension
+    var textmate = {
+      ready: false,
+      registry: null,
+      grammarCache: {},       // scopeName -> { format, content }
+      pendingScopes: {},      // scopeName -> resolve fn
+      resolvedLanguage: null, // language id resolved by the extension, or null
+      grammarRequestedFor: null  // file the last getGrammar request was sent for
     };
 
     // ==================================================================
@@ -391,8 +403,92 @@
     }
 
     // ==================================================================
+    // TextMate grammar support
+    // ==================================================================
+    function loadTextMate() {
+      if (textmate.ready) return Promise.resolve();
+      var onigLib = TextMate.loadWASM(__ONIG_WASM_URI__).then(function () {
+        return {
+          createOnigScanner: TextMate.createOnigScanner,
+          createOnigString: TextMate.createOnigString
+        };
+      });
+      return onigLib.then(function () {
+        textmate.registry = new TextMate.Registry({
+          onigLib: onigLib,
+          getGrammarDefinition: function (scopeName) {
+            return getGrammarForScope(scopeName).then(function (def) {
+              return { format: def.format, content: def.grammar };
+            });
+          }
+        });
+        textmate.ready = true;
+      });
+    }
+
+    // Fetch a grammar for a scope from the extension (delegated by the registry),
+    // awaiting the async round-trip via a promise keyed by scope name.
+    function getGrammarForScope(scopeName) {
+      if (textmate.grammarCache.hasOwnProperty(scopeName)) {
+        return Promise.resolve(textmate.grammarCache[scopeName]);
+      }
+      return new Promise(function (resolve) {
+        textmate.pendingScopes[scopeName] = resolve;
+        vscode.postMessage({ command: 'getGrammarForScope', scopeName: scopeName });
+      });
+    }
+
+    // Wrap vscode-textmate's rule stack in Monaco's IState shape (clone/equals).
+    function wrapState(ruleStack) {
+      return {
+        _stack: ruleStack,
+        clone: function () { return wrapState(ruleStack); },
+        equals: function (other) { return !!other && other._stack === ruleStack; }
+      };
+    }
+    function unwrapState(state) {
+      return (state && state._stack) ? state._stack : state;
+    }
+
+    function makeTokensProvider(grammar) {
+      return {
+        getInitialState: function () { return wrapState(grammar.createInitialState()); },
+        tokenize: function (line, state) {
+          var result = grammar.tokenizeLine(line, unwrapState(state));
+          var tokens = result.tokens.map(function (t) {
+            return { startIndex: t.startIndex, scopes: t.scopes.join(' ') };
+          });
+          return { tokens: tokens, endState: wrapState(result.ruleStack) };
+        }
+      };
+    }
+
+    // Load a grammar for a scope and register it as the token provider for a language.
+    function applyGrammar(languageId, scopeName) {
+      if (!textmate.ready) return loadTextMate().then(function () { return applyGrammar(languageId, scopeName); });
+      return textmate.registry.loadGrammar(scopeName).then(function (grammar) {
+        var known = false;
+        var langs = monaco.languages.getLanguages();
+        for (var i = 0; i < langs.length; i++) {
+          if (langs[i].id === languageId) { known = true; break; }
+        }
+        if (!known) monaco.languages.register({ id: languageId });
+        monaco.languages.setTokensProvider(languageId, makeTokensProvider(grammar));
+      });
+    }
+
+    // ==================================================================
     // Render diff
     // ==================================================================
+    // Request a TextMate grammar for a file from the extension. Guarded so we
+    // only ask once per file (or again when a different file renders).
+    function requestGrammarForFile(file) {
+      if (!textmate.resolvedLanguage || textmate.grammarRequestedFor !== file) {
+        textmate.grammarRequestedFor = file;
+        vscode.postMessage({ command: 'getGrammar', file: file });
+      }
+    }
+
     function renderDiff(data) {
       // If Monaco not loaded yet, defer
       if (!MONACO_LOADED) {
@@ -403,6 +499,10 @@
       // New file → allow re-positioning the cursor to the first hunk.
       if (state.file !== data.file) {
         state._initialCursorSet = false;
+        // A different file now renders: drop any language the previous file's
+        // grammar response resolved so we don't apply a stale language here.
+        textmate.resolvedLanguage = null;
+        textmate.grammarRequestedFor = null;
       }
       state.file = data.file;
 
@@ -413,7 +513,8 @@
 
       var original = data.original || '';
       var modified = data.modified || '';
-      var language = getLanguageFromFilename(data.file);
+      var language = textmate.resolvedLanguage || getLanguageFromFilename(data.file);
+      requestGrammarForFile(data.file);
 
       // Dispose old overlay widgets
       clearHunkButtons();
@@ -959,6 +1060,46 @@
         case 'openCurrentFile':
           openCurrentFile();
           break;
+        case 'grammarResponse':
+          // Ignore a grammar response for a file that is no longer displayed.
+          if (msg.file !== state.file) break;
+          textmate.grammarCache[msg.scopeName] = { format: msg.format, grammar: msg.grammar };
+          textmate.resolvedLanguage = msg.languageId;
+          applyGrammar(msg.languageId, msg.scopeName).then(function () {
+            if (state.originalModel && state.modifiedModel) {
+              if (state.originalModel.getLanguageId() !== msg.languageId) {
+                monaco.editor.setModelLanguage(state.originalModel, msg.languageId);
+              }
+              if (state.modifiedModel.getLanguageId() !== msg.languageId) {
+                monaco.editor.setModelLanguage(state.modifiedModel, msg.languageId);
+              }
+            }
+          }).catch(function () {
+            // loadGrammar / setTokensProvider failed — keep the monarch path.
+          });
+          break;
+
+        case 'grammarError':
+          // Extension couldn't resolve/read a grammar — keep monarch path.
+          if (msg.languageId) textmate.resolvedLanguage = msg.languageId;
+          break;
+
+        case 'scopeGrammarResponse':
+          textmate.grammarCache[msg.scopeName] = { format: msg.format, grammar: msg.grammar };
+          if (textmate.pendingScopes[msg.scopeName]) {
+            textmate.pendingScopes[msg.scopeName](textmate.grammarCache[msg.scopeName]);
+            delete textmate.pendingScopes[msg.scopeName];
+          }
+          break;
+
+        case 'scopeGrammarError':
+          textmate.grammarCache[msg.scopeName] = null;
+          if (textmate.pendingScopes[msg.scopeName]) {
+            textmate.pendingScopes[msg.scopeName](null);
+            delete textmate.pendingScopes[msg.scopeName];
+          }
+          break;
+
         case 'triggerSave':
           // Extension asked us to save (Ctrl+S / File>Save while this panel is focused).
           // Only save if there is a modified model to persist.
