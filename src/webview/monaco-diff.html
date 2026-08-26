@@ -499,6 +499,10 @@
       // New file → allow re-positioning the cursor to the first hunk.
       if (state.file !== data.file) {
         state._initialCursorSet = false;
+        // A different file now renders: drop any language the previous file's
+        // grammar response resolved so we don't apply a stale language here.
+        textmate.resolvedLanguage = null;
+        textmate.grammarRequestedFor = null;
       }
       state.file = data.file;
 
@@ -1057,6 +1061,8 @@
           openCurrentFile();
           break;
         case 'grammarResponse':
+          // Ignore a grammar response for a file that is no longer displayed.
+          if (msg.file !== state.file) break;
           textmate.grammarCache[msg.scopeName] = { format: msg.format, grammar: msg.grammar };
           textmate.resolvedLanguage = msg.languageId;
           applyGrammar(msg.languageId, msg.scopeName).then(function () {
@@ -1068,6 +1074,8 @@
                 monaco.editor.setModelLanguage(state.modifiedModel, msg.languageId);
               }
             }
+          }).catch(function () {
+            // loadGrammar / setTokensProvider failed — keep the monarch path.
           });
           break;
 
