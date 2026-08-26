@@ -65,6 +65,8 @@ powershell -File scripts/package.ps1 -SkipTests # 跳过测试
 | `src/HooksManager.ts` | Hook 部署和自动更新 |
 | `hooks/pre-tool-use.js` | PreToolUse hook：编辑前保存快照 |
 | `hooks/session-end.js` | SessionEnd hook：计算 diff、生成扁平 patch + index.json |
+| `src/GrammarManager.ts` | 语言解析与语法文件查找（files.associations / 贡献扩展语法）· 新建 |
+| `scripts/build-textmate.js` | esbuild 打包 monaco-textmate + vscode-oniguruma 及 onig.wasm · 新建 |
 | `test/integration-test.sh` | Hooks 端到端集成测试 |
 | `scripts/package.ps1` | 一键打包脚本 |
 
