@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SnapshotManager } from './SnapshotManager';
+import { GrammarManager } from './GrammarManager';
 
 /**
  * Manages a Monaco Diff Editor based WebviewPanel.
@@ -11,6 +12,7 @@ export class MonacoDiffProvider {
   private _workspaceRoot: string;
   private _snapshotManager: SnapshotManager;
   private _outputChannel: vscode.OutputChannel;
+  private _grammarManager: GrammarManager;
 
   private _panel: vscode.WebviewPanel | null = null;
   private _currentFile: string = '';
@@ -40,6 +42,7 @@ export class MonacoDiffProvider {
     this._workspaceRoot = workspaceRoot;
     this._snapshotManager = snapshotManager;
     this._outputChannel = outputChannel;
+    this._grammarManager = new GrammarManager();
   }
 
   /** Expose current file for editor/title commands */
@@ -302,6 +305,43 @@ export class MonacoDiffProvider {
         }
         break;
       }
+
+      case 'getGrammar': {
+        const languageId = this._grammarManager.resolveLanguageId(msg.file, this._workspaceRoot);
+        if (!languageId) {
+          this._panel?.webview.postMessage({ command: 'grammarError', file: msg.file, languageId: '' });
+          break;
+        }
+        const grammar = this._grammarManager.findGrammar(languageId);
+        if (!grammar) {
+          this._panel?.webview.postMessage({ command: 'grammarError', file: msg.file, languageId });
+          break;
+        }
+        this._panel?.webview.postMessage({
+          command: 'grammarResponse',
+          file: msg.file,
+          languageId,
+          scopeName: grammar.scopeName,
+          format: grammar.format,
+          grammar: grammar.content,
+        });
+        break;
+      }
+
+      case 'getGrammarForScope': {
+        const grammar = this._grammarManager.findGrammar(msg.scopeName);
+        if (!grammar) {
+          this._panel?.webview.postMessage({ command: 'scopeGrammarError', scopeName: msg.scopeName });
+          break;
+        }
+        this._panel?.webview.postMessage({
+          command: 'scopeGrammarResponse',
+          scopeName: msg.scopeName,
+          format: grammar.format,
+          grammar: grammar.content,
+        });
+        break;
+      }
     }
   }
 
@@ -412,9 +452,17 @@ export class MonacoDiffProvider {
     const baseUri = this._panel!.webview.asWebviewUri(
       vscode.Uri.file(path.join(__dirname, 'webview'))
     );
+    const wasmUri = this._panel!.webview.asWebviewUri(
+      vscode.Uri.file(path.join(__dirname, 'webview', 'onig.wasm'))
+    );
+    const textmateUri = this._panel!.webview.asWebviewUri(
+      vscode.Uri.file(path.join(__dirname, 'webview', 'textmate.js'))
+    );
     return template
       .replace('__MONACO_LOADER_JS__', loaderUri.toString())
-      .replaceAll('__MONACO_BASE_URI__', baseUri.toString() + '/');
+      .replaceAll('__MONACO_BASE_URI__', baseUri.toString() + '/')
+      .replaceAll('__ONIG_WASM_URI__', wasmUri.toString())
+      .replaceAll('__TEXTMATE_JS__', textmateUri.toString());
   }
 
   private _resolveTemplatePath(): string {
