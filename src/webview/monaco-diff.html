@@ -223,6 +223,7 @@
   </div>
 
   <script src="__MONACO_LOADER_JS__"></script>
+  <script src="__TEXTMATE_JS__"></script>
   <script>
     // ==================================================================
     // VSCode API
@@ -259,6 +260,16 @@
       currentHunkIndex: -1,  // 0-based index into changes array, -1 = none
       dirty: false,          // true when modified model differs from disk
       _syncing: false        // true while we programmatically setValue (ignore change events)
+    };
+
+    // TextMate grammar support
+    var __ONIG_WASM_URI__ = '__ONIG_WASM_URI__'; // replaced by extension
+    var textmate = {
+      ready: false,
+      registry: null,
+      grammarCache: {},       // scopeName -> { format, content }
+      pendingScopes: {},      // scopeName -> resolve fn
+      resolvedLanguage: null  // language id resolved by the extension, or null
     };
 
     // ==================================================================
@@ -388,6 +399,81 @@
       if (!state.diffEditor) return;
       var theme = detectMonacoTheme();
       monaco.editor.setTheme(theme);
+    }
+
+    // ==================================================================
+    // TextMate grammar support
+    // ==================================================================
+    function loadTextMate() {
+      if (textmate.ready) return Promise.resolve();
+      var onigLib = TextMate.loadWASM(__ONIG_WASM_URI__).then(function () {
+        return {
+          createOnigScanner: TextMate.createOnigScanner,
+          createOnigString: TextMate.createOnigString
+        };
+      });
+      return onigLib.then(function () {
+        textmate.registry = new TextMate.Registry({
+          onigLib: onigLib,
+          getGrammarDefinition: function (scopeName) {
+            return getGrammarForScope(scopeName).then(function (def) {
+              return { format: def.format, content: def.grammar };
+            });
+          }
+        });
+        textmate.ready = true;
+      });
+    }
+
+    // Fetch a grammar for a scope from the extension (delegated by the registry),
+    // awaiting the async round-trip via a promise keyed by scope name.
+    function getGrammarForScope(scopeName) {
+      if (textmate.grammarCache[scopeName]) {
+        return Promise.resolve(textmate.grammarCache[scopeName]);
+      }
+      return new Promise(function (resolve) {
+        textmate.pendingScopes[scopeName] = resolve;
+        vscode.postMessage({ command: 'getGrammarForScope', scopeName: scopeName });
+      });
+    }
+
+    // Wrap vscode-textmate's rule stack in Monaco's IState shape (clone/equals).
+    function wrapState(ruleStack) {
+      return {
+        _stack: ruleStack,
+        clone: function () { return wrapState(ruleStack); },
+        equals: function (other) { return !!other && other._stack === ruleStack; }
+      };
+    }
+    function unwrapState(state) {
+      return (state && state._stack) ? state._stack : state;
+    }
+
+    function makeTokensProvider(grammar) {
+      return {
+        getInitialState: function () { return wrapState(grammar.createInitialState()); },
+        tokenize: function (line, state) {
+          var result = grammar.tokenizeLine(line, unwrapState(state));
+          var tokens = result.tokens.map(function (t) {
+            return { startIndex: t.startIndex, scopes: t.scopes.join(' ') };
+          });
+          return { tokens: tokens, endState: wrapState(result.ruleStack) };
+        }
+      };
+    }
+
+    // Load a grammar for a scope and register it as the token provider for a language.
+    function applyGrammar(languageId, scopeName) {
+      if (!textmate.ready) return loadTextMate().then(function () { return applyGrammar(languageId, scopeName); });
+      return textmate.registry.loadGrammar(scopeName).then(function (grammar) {
+        var known = false;
+        var langs = monaco.languages.getLanguages();
+        for (var i = 0; i < langs.length; i++) {
+          if (langs[i].id === languageId) { known = true; break; }
+        }
+        if (!known) monaco.languages.register({ id: languageId });
+        monaco.languages.setTokensProvider(languageId, makeTokensProvider(grammar));
+      });
     }
 
     // ==================================================================
