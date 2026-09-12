@@ -4,11 +4,14 @@ import * as vscode from 'vscode';
 import { SnapshotManager, buildBranchNotice } from './SnapshotManager';
 import { WebviewProvider } from './WebviewProvider';
 import { MonacoDiffProvider } from './MonacoDiffProvider';
+import { NativeDiffProvider } from './NativeDiffProvider';
+import { DiffViewerRouter } from './DiffViewerRouter';
 import { HooksManager } from './HooksManager';
 
 let snapshotManager: SnapshotManager;
 let webviewProvider: WebviewProvider;
 let diffEditorManager: MonacoDiffProvider;
+let diffViewerRouter: DiffViewerRouter;
 let hooksManager: HooksManager;
 let fileWatcher: vscode.FileSystemWatcher | undefined;
 let notifyWatcher: vscode.FileSystemWatcher | undefined;
@@ -48,7 +51,10 @@ export function activate(context: vscode.ExtensionContext): void {
   snapshotManager.setWorkspaceRoot(workspaceRoot);
   snapshotManager.loadFiles(workspaceRoot);
 
-  // ── DiffEditorManager (replaces DiffPanelProvider) ──
+  // ── Diff viewers ──
+  // The Monaco webview panel backs the editor/title commands below; the native
+  // provider is only ever reached through the router, which picks between the
+  // two based on the cc-diff.diffViewer setting.
   diffEditorManager = new MonacoDiffProvider(workspaceRoot, snapshotManager, outputChannel);
   context.subscriptions.push(diffEditorManager);
   // When all hunks for a file are processed, refresh sidebar
@@ -56,8 +62,12 @@ export function activate(context: vscode.ExtensionContext): void {
     webviewProvider.refresh();
   };
 
+  const nativeDiffProvider = new NativeDiffProvider(workspaceRoot, snapshotManager, outputChannel);
+  diffViewerRouter = new DiffViewerRouter(diffEditorManager, nativeDiffProvider, outputChannel);
+  context.subscriptions.push(diffViewerRouter);
+
   // ── WebviewProvider (sidebar) ──
-  webviewProvider = new WebviewProvider(workspaceRoot, snapshotManager, outputChannel, diffEditorManager);
+  webviewProvider = new WebviewProvider(workspaceRoot, snapshotManager, outputChannel, diffViewerRouter);
 
   // ── Sidebar webview ──
   context.subscriptions.push(
@@ -241,6 +251,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('cc-diff.openCurrentFile', () => {
       log('Command: openCurrentFile');
       diffEditorManager.openCurrentFile();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('cc-diff.toggleHideUnchanged', () => {
+      log('Command: toggleHideUnchanged');
+      diffEditorManager.toggleHideUnchanged();
     })
   );
 

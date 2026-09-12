@@ -12,7 +12,7 @@ export class HooksManager {
   private logger: (msg: string) => void = () => {};
 
   /** Version marker written to the hooks target directory for update checks. */
-  private static readonly VERSION_MARKER = 'cc-diff-hooks-v4';
+  private static readonly VERSION_MARKER = 'cc-diff-hooks-v5';
 
   constructor(extensionPath: string) {
     this.extensionPath = extensionPath;
@@ -160,7 +160,7 @@ export class HooksManager {
     this.writeVersionMarker(targetDir);
 
     // 3. Update .claude/settings.json
-    await this.updateClaudeSettings(workspaceRoot, targetDir);
+    await this.updateClaudeSettings(workspaceRoot);
     this.logger('setupHooks: .claude/settings.json updated');
     this.logger('setupHooks: complete');
   }
@@ -207,10 +207,7 @@ export class HooksManager {
    * Merge the cc-diff hook configuration into the project's
    * .claude/settings.json. Preserves existing settings.
    */
-  private async updateClaudeSettings(
-    workspaceRoot: string,
-    hooksDir: string
-  ): Promise<void> {
+  private async updateClaudeSettings(workspaceRoot: string): Promise<void> {
     const claudeDir = path.join(workspaceRoot, '.claude');
     const settingsPath = path.join(claudeDir, 'settings.json');
 
@@ -225,11 +222,16 @@ export class HooksManager {
       }
     }
 
-    // Build hook command paths (use forward slashes for cross-platform JSON)
-    const posixHooksDir = hooksDir.replace(/\\/g, '/');
-    const preToolUseCmd = `node ${posixHooksDir}/pre-tool-use.js`;
-    const postToolUseCmd = `node ${posixHooksDir}/post-tool-use.js`;
-    const sessionEndCmd = `node ${posixHooksDir}/session-end.js`;
+    // Build hook command paths from ${CLAUDE_PROJECT_DIR} so the commands are
+    // portable (no hardcoded drive/workspace path) and resolve against the
+    // project root regardless of the session's current working directory.
+    // A bare relative path (e.g. `node .claude/...`) would break when CWD
+    // drifts after a `cd` in a Bash tool call. Escaped \${...} so the
+    // placeholder is emitted literally rather than interpolated as a variable.
+    const hooksRelDir = '.claude/cc-diff/hooks';
+    const preToolUseCmd = `node "\${CLAUDE_PROJECT_DIR}/${hooksRelDir}/pre-tool-use.js"`;
+    const postToolUseCmd = `node "\${CLAUDE_PROJECT_DIR}/${hooksRelDir}/post-tool-use.js"`;
+    const sessionEndCmd = `node "\${CLAUDE_PROJECT_DIR}/${hooksRelDir}/session-end.js"`;
 
     // Ensure hooks container exists
     if (!settings.hooks) {

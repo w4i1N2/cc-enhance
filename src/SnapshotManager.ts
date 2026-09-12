@@ -158,6 +158,30 @@ export class SnapshotManager {
     return this.files.size === 0;
   }
 
+  /**
+   * Resolve a tracked file key to an existing absolute path.
+   *
+   * Keys are normally full workspace-relative paths (e.g.
+   * `src/webview/monaco-diff.html`), but the snapshot hook can record a bare
+   * basename (e.g. `monaco-diff.html`) when a file sits outside the workspace
+   * root (see the `path.posix.basename` fallback in the pre-tool-use hook).
+   * Resolving a bare basename against the workspace root yields a path that
+   * doesn't exist, so every workspace-file read silently came back empty.
+   *
+   * Fix: try the direct resolution first; if the key is a bare basename and the
+   * direct path doesn't exist, fall back to a bounded search of the workspace
+   * tree for a file with that exact basename.
+   */
+  resolveWorkspaceFile(filePath: string): string {
+    const absPath = path.resolve(this.workspaceRoot, filePath);
+    if (fs.existsSync(absPath)) return absPath;
+    if (path.basename(filePath) === filePath) {
+      const found = findFileByBasename(this.workspaceRoot, filePath);
+      if (found) return found;
+    }
+    return absPath;
+  }
+
   // ------------------------------------------------------------------
   // Git branch helpers
   // ------------------------------------------------------------------
@@ -245,7 +269,7 @@ export class SnapshotManager {
     const snapPath = this.getSnapshotPath(filePath);
     const snapshotContent = this.getSnapshotContent(filePath) ?? '';
 
-    const absPath = path.resolve(workspaceRoot, filePath);
+    const absPath = this.resolveWorkspaceFile(filePath);
     let workspaceContent = '';
     try { workspaceContent = fs.readFileSync(absPath, 'utf8'); } catch {}
 
@@ -287,7 +311,7 @@ export class SnapshotManager {
     const entry = this.getFileEntry(filePath);
     if (!entry) return { success: false, error: 'File not tracked' };
 
-    const absPath = path.resolve(workspaceRoot, filePath);
+    const absPath = this.resolveWorkspaceFile(filePath);
     let currentContent: string;
     try { currentContent = fs.readFileSync(absPath, 'utf8'); } catch { currentContent = ''; }
 
@@ -354,7 +378,7 @@ export class SnapshotManager {
     // Treat missing snapshot as empty (file creation scenario)
     const snapshotContent = this.getSnapshotContent(filePath) ?? '';
 
-    const absPath = path.resolve(workspaceRoot, filePath);
+    const absPath = this.resolveWorkspaceFile(filePath);
 
     if (snapshotContent === '' && !fs.existsSync(absPath)) {
       // Both sides empty — nothing to do, just clean up
@@ -449,6 +473,41 @@ export class SnapshotManager {
       }
     }
   }
+}
+
+/** Directories skipped during the basename fallback search. */
+const SEARCH_EXCLUDE = new Set([
+  'node_modules', '.git', '.claude', 'out', 'dist', 'build', 'target',
+  'coverage', '.vscode', '.idea',
+]);
+
+/** Maximum directory depth to search for a basename-keyed file. */
+const SEARCH_MAX_DEPTH = 5;
+
+/**
+ * Walk the workspace tree (bounded depth, skipping build/vendor dirs) for a
+ * file whose basename matches exactly. Returns the first match, or null.
+ * Used only as a fallback when a tracked key is a bare basename that doesn't
+ * resolve directly under the workspace root.
+ */
+function findFileByBasename(root: string, basename: string, depth = 0): string | null {
+  if (depth > SEARCH_MAX_DEPTH) return null;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (SEARCH_EXCLUDE.has(entry.name)) continue;
+      const found = findFileByBasename(path.join(root, entry.name), basename, depth + 1);
+      if (found) return found;
+    } else if (entry.name === basename) {
+      return path.join(root, entry.name);
+    }
+  }
+  return null;
 }
 
 /** Max file paths shown inline in the branch-switch notice before truncating. */

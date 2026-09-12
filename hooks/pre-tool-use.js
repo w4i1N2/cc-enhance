@@ -119,7 +119,11 @@ async function main() {
     const posixAbsPath = toPosix(absPath);
     let relativePath = path.posix.relative(posixRoot, posixAbsPath);
     if (relativePath.startsWith('..')) {
-      relativePath = path.posix.basename(posixAbsPath);
+      // File is outside the workspace root — a relative key would escape the
+      // workspace. Record the absolute POSIX path instead of a bare basename,
+      // so the key stays resolvable (path.resolve(workspaceRoot, absPath)
+      // returns the absolute path itself) and never becomes ambiguous.
+      relativePath = posixAbsPath;
     }
 
     const safeFile = toSafeFileName(relativePath);

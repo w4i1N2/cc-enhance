@@ -11,6 +11,7 @@
   "Clean Up": "清理",
   "Cancel": "取消",
   "CC Diff: No changes to display for \"{0}\".": "CC Diff: \"{0}\" 没有可显示的变更。",
+  "CC Diff: {0} (Snapshot ↔ Current)": "CC Diff: {0}（快照 ↔ 当前）",
   "CC Diff: Failed to keep hunk — {0}": "CC Diff: 接受 Hunk 失败 — {0}",
   "CC Diff: Failed to undo hunk — {0}": "CC Diff: 撤销 Hunk 失败 — {0}",
   "CC Diff: Failed to open \"{0}\" — {1}": "CC Diff: 打开 \"{0}\" 失败 — {1}",

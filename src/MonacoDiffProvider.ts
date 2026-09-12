@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SnapshotManager } from './SnapshotManager';
-import { GrammarManager } from './GrammarManager';
 
 /**
  * Manages a Monaco Diff Editor based WebviewPanel.
@@ -12,7 +11,6 @@ export class MonacoDiffProvider {
   private _workspaceRoot: string;
   private _snapshotManager: SnapshotManager;
   private _outputChannel: vscode.OutputChannel;
-  private _grammarManager: GrammarManager;
 
   private _panel: vscode.WebviewPanel | null = null;
   private _currentFile: string = '';
@@ -42,7 +40,6 @@ export class MonacoDiffProvider {
     this._workspaceRoot = workspaceRoot;
     this._snapshotManager = snapshotManager;
     this._outputChannel = outputChannel;
-    this._grammarManager = new GrammarManager();
   }
 
   /** Expose current file for editor/title commands */
@@ -65,7 +62,7 @@ export class MonacoDiffProvider {
     // Get snapshot content — null means file creation (treat as empty)
     const snapshotContent = this._snapshotManager.getSnapshotContent(filePath) ?? '';
 
-    const absPath = path.resolve(this._workspaceRoot, filePath);
+    const absPath = this._snapshotManager.resolveWorkspaceFile(filePath);
     let currentContent = '';
     try {
       currentContent = fs.readFileSync(absPath, 'utf8');
@@ -181,6 +178,12 @@ export class MonacoDiffProvider {
     this._panel.webview.postMessage({ command: 'toggleMode' });
   }
 
+  /** Toggle collapsing/hiding unchanged regions in the diff view */
+  toggleHideUnchanged(): void {
+    if (!this._panel) return;
+    this._panel.webview.postMessage({ command: 'toggleHideUnchanged' });
+  }
+
   /** Ask webview for current cursor position, then open file at that line */
   openCurrentFile(): void {
     if (!this._panel || !this._currentFile) return;
@@ -252,7 +255,7 @@ export class MonacoDiffProvider {
         break;
 
       case 'saveFile': {
-        const absPath = path.resolve(this._workspaceRoot, this._currentFile);
+        const absPath = this._snapshotManager.resolveWorkspaceFile(this._currentFile);
         try {
           fs.mkdirSync(path.dirname(absPath), { recursive: true });
           fs.writeFileSync(absPath, msg.content, 'utf8');
@@ -288,7 +291,7 @@ export class MonacoDiffProvider {
         break;
 
       case 'openCurrentFile': {
-        const absPath = path.resolve(this._workspaceRoot, msg.file);
+        const absPath = this._snapshotManager.resolveWorkspaceFile(msg.file);
         const line = typeof msg.line === 'number' ? msg.line : 1;
         try {
           const doc = await vscode.workspace.openTextDocument(absPath);
@@ -306,42 +309,6 @@ export class MonacoDiffProvider {
         break;
       }
 
-      case 'getGrammar': {
-        const languageId = this._grammarManager.resolveLanguageId(msg.file, this._workspaceRoot);
-        if (!languageId) {
-          this._panel?.webview.postMessage({ command: 'grammarError', file: msg.file, languageId: '' });
-          break;
-        }
-        const grammar = this._grammarManager.findGrammar(languageId);
-        if (!grammar) {
-          this._panel?.webview.postMessage({ command: 'grammarError', file: msg.file, languageId });
-          break;
-        }
-        this._panel?.webview.postMessage({
-          command: 'grammarResponse',
-          file: msg.file,
-          languageId,
-          scopeName: grammar.scopeName,
-          format: grammar.format,
-          grammar: grammar.content,
-        });
-        break;
-      }
-
-      case 'getGrammarForScope': {
-        const grammar = this._grammarManager.findGrammar(msg.scopeName);
-        if (!grammar) {
-          this._panel?.webview.postMessage({ command: 'scopeGrammarError', scopeName: msg.scopeName });
-          break;
-        }
-        this._panel?.webview.postMessage({
-          command: 'scopeGrammarResponse',
-          scopeName: msg.scopeName,
-          format: grammar.format,
-          grammar: grammar.content,
-        });
-        break;
-      }
     }
   }
 
@@ -384,7 +351,7 @@ export class MonacoDiffProvider {
     // Treat missing snapshot as empty (file creation scenario)
     const snapshotContent = this._snapshotManager.getSnapshotContent(this._currentFile) ?? '';
 
-    const absPath = path.resolve(this._workspaceRoot, this._currentFile);
+    const absPath = this._snapshotManager.resolveWorkspaceFile(this._currentFile);
     let currentContent = '';
     try {
       currentContent = fs.readFileSync(absPath, 'utf8');
@@ -452,17 +419,9 @@ export class MonacoDiffProvider {
     const baseUri = this._panel!.webview.asWebviewUri(
       vscode.Uri.file(path.join(__dirname, 'webview'))
     );
-    const wasmUri = this._panel!.webview.asWebviewUri(
-      vscode.Uri.file(path.join(__dirname, 'webview', 'onig.wasm'))
-    );
-    const textmateUri = this._panel!.webview.asWebviewUri(
-      vscode.Uri.file(path.join(__dirname, 'webview', 'textmate.js'))
-    );
     return template
       .replace('__MONACO_LOADER_JS__', loaderUri.toString())
-      .replaceAll('__MONACO_BASE_URI__', baseUri.toString() + '/')
-      .replaceAll('__ONIG_WASM_URI__', wasmUri.toString())
-      .replaceAll('__TEXTMATE_JS__', textmateUri.toString());
+      .replaceAll('__MONACO_BASE_URI__', baseUri.toString() + '/');
   }
 
   private _resolveTemplatePath(): string {

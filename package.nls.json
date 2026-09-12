@@ -1,4 +1,7 @@
 {
+  "cc-diff.config.diffViewer": "How file diffs are displayed. `custom` uses the built-in CC Diff panel with per-hunk Keep/Undo. `native` uses VS Code's diff editor.",
+  "cc-diff.config.diffViewer.custom": "CC Diff panel (per-hunk Keep/Undo)",
+  "cc-diff.config.diffViewer.native": "VS Code native diff editor",
   "cc-diff.command.setupHooks": "Install Hook Scripts",
   "cc-diff.command.keepAllFileEditor": "Keep All",
   "cc-diff.command.undoAllFileEditor": "Undo All",
@@ -6,6 +9,7 @@
   "cc-diff.command.nextHunk": "Next Hunk",
   "cc-diff.command.toggleDiffMode": "Toggle Diff Show Mode",
   "cc-diff.command.openCurrentFile": "Open File",
+  "cc-diff.command.toggleHideUnchanged": "Toggle Hide Unchanged Regions",
   "cc-diff.command.saveDiff": "Save",
   "cc-diff.viewContainer.title": "CC Diff",
   "cc-diff.view.name": "Changes",

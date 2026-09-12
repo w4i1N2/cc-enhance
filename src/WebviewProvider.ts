@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SnapshotManager, type TrackedFile, buildBranchNotice } from './SnapshotManager';
-import { MonacoDiffProvider } from './MonacoDiffProvider';
+import { DiffViewerRouter } from './DiffViewerRouter';
 
 // ======================================================================
 // Types for webview communication
@@ -24,13 +24,13 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
   private _workspaceRoot: string;
   private _snapshotManager: SnapshotManager;
   private _outputChannel: vscode.OutputChannel;
-  private _diffEditorManager: MonacoDiffProvider;
+  private _diffEditorManager: DiffViewerRouter;
 
   constructor(
     workspaceRoot: string,
     snapshotManager: SnapshotManager,
     outputChannel: vscode.OutputChannel,
-    diffEditorManager: MonacoDiffProvider
+    diffEditorManager: DiffViewerRouter
   ) {
     this._workspaceRoot = workspaceRoot;
     this._snapshotManager = snapshotManager;
@@ -78,7 +78,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
       // file are missing, remove the stale entry from the list.
       const snapshotContent = this._snapshotManager.getSnapshotContent(file);
       const snapshotExists = snapshotContent !== null && snapshotContent !== '';
-      const workspacePath = path.resolve(this._workspaceRoot, file);
+      const workspacePath = this._snapshotManager.resolveWorkspaceFile(file);
       const workspaceExists = fs.existsSync(workspacePath);
 
       if (!snapshotExists && !workspaceExists) {

@@ -51,8 +51,7 @@ function readIndex(indexPath) {
     const data = JSON.parse(raw);
     if (!Array.isArray(data.files)) {
       return { version: 2, files: [] };
-
-    debugLog(`session_id=${session_id} file="${relativePath}"`);
+    }
     return data;
   } catch (e) {
     debugLog(`readIndex: WARN — ${e.message}`);
@@ -108,12 +107,13 @@ async function main() {
     // Compute POSIX relative path (same logic as pre-tool-use.js)
     const absPath = path.resolve(workspaceRoot, filePath);
     const posixRoot = toPosix(workspaceRoot);
-
     const posixAbsPath = toPosix(absPath);
-
+    let relativePath = path.posix.relative(posixRoot, posixAbsPath);
     if (relativePath.startsWith('..')) {
-    if (relativePath.startsWith('..')) {
-
+      // File is outside the workspace root — record the absolute path so the
+      // key stays resolvable (matches pre-tool-use.js), instead of a bare
+      // basename which is ambiguous.
+      relativePath = posixAbsPath;
     }
 
     debugLog(`session_id=${session_id} file="${relativePath}"`);
