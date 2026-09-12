@@ -1,7 +1,29 @@
+# ── Source and build inputs ──────────────────────────────────────────
+# Compiled output ships from out/ (see npm run build).
+src/**
+scripts/**
+tsconfig.json
+package-lock.json
+.gitignore
+.vscodeignore
 .vscode/**
 .github/**
-src/**
-tsconfig.json
-.gitignore
+
+# ── Development-only directories ─────────────────────────────────────
+# Monaco's editor assets are copied into out/webview/vs by
+# `npm run copy-webview`, so nothing under node_modules/ is needed at runtime.
+node_modules/**
+docs/**
+test/**
+.claude/**
+.superpowers/**
+CLAUDE.md
+
+# ── hooks/ DOES ship ─────────────────────────────────────────────────
+# The extension deploys these into <workspace>/.claude/cc-diff/hooks, so
+# re-include them after the node_modules/** exclusion above.
 !hooks/**
 hooks/node_modules/**
+
+# ── Packaged or published elsewhere ──────────────────────────────────
+*.vsix

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * stdin:  { hook_event_name, tool_name, tool_input, session_id, cwd } cc-diff PostToolUse Hook (v4)
+ * cc-diff PostToolUse Hook (v5)
  *
- * stdin:  { hook_event_name, tool_name, tool_input, session_id, cwd }
- * Removes the entry if content was reverted (no diff).
+ * Removes the tracked entry when the file's content matches its snapshot
+ * again (edit was reverted), so reverted files drop out of the sidebar.
  * No longer computes or stores diffs.
  *
  * stdin:  { hook_event_name, tool_name, tool_input, session_id, cwd }

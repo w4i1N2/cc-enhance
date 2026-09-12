@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * cc-diff PreToolUse Hook (v4)
+ * cc-diff PreToolUse Hook (v5)
  *
  * Saves a snapshot of file content before Claude Code edits it.
  * Uses flat storage: .claude/cc-diff/snapshots/<safeFile>.snap

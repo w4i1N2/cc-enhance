@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * cc-diff Stop Hook (v4)
+ * cc-diff Stop Hook (v5)
  *
  * Simplified: scans tracked files in index.json, verifies each file
  * still has changes vs its snapshot, removes entries where the file
